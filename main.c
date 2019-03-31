@@ -22,13 +22,23 @@ const short int DARK_LIME_TO_LIME_1 = 0xB696;
 const short int DARK_LIME_TO_LIME_2 = 0xCED6;
 const short int MIDDLE_TO_TOP = 0x7473;
 
-double oscillationRate = 0.2;
 
 
 /* Global variables for drawing */
 volatile int pixel_buffer_start; // global variable
 volatile int* pixel_ctrl_ptr;
 volatile int *sFlag = (int *)0xFF20302C;
+
+double oscillationRate = 0.2;
+
+/* Global variable for user input */
+volatile int* keys_ptr = (int *)0xFF200050;
+volatile int* keys_edge_ptr = (int *)0xFF20005C;
+bool run = true;
+bool pulse_out = false;
+// double oscillationFactor = 0.25;
+bool new_pulse = true;
+// bool start_pulse = false;
 
 typedef struct RectangularPrism{
 
@@ -41,6 +51,8 @@ typedef struct RectangularPrism{
     int height;
 
     double angle;
+    
+    double distanceFromMiddle;
 
 }RectPrism;
 
@@ -51,6 +63,8 @@ void plot_pixel(int x, int y, short int LINE_COLOR);
 void swap(short int* e1, short int* e2);
 void clear_screen();
 void SBitSync();
+void checkForKeys();
+void stopOnKey();
 // double cos(double x);
 // double pow(double x, int power);
 
@@ -59,6 +73,9 @@ int main(){
     int i, j;
     srand(423);
     pixel_ctrl_ptr = (int *)0xFF203020;
+
+	// Reset edge capture for keys
+    *keys_edge_ptr = *keys_edge_ptr;
 
     // initialize location and direction of prisms
     RectPrism rectPrism[NUM_PRISMS];
@@ -112,8 +129,9 @@ int main(){
 
     for(i = 0; i < NUM_PRISMS; i++){
         // Calcualte distance between current prism and middle prism
-        double distanceFromMiddle = pow(rectPrism[i].xloc - middleX, 2) + 
+       	 double distanceFromMiddle = pow(rectPrism[i].xloc - middleX, 2) + 
                                     pow(rectPrism[i].yloc - middleY, 2);
+        
         
         // 0 < ratio < 1
         // larger as it gets closer to the middle prism
@@ -123,6 +141,8 @@ int main(){
         rectPrism[i].angle = ratio * PI * 2;
 
         rectPrism[i].height = INITIAL_HEIGHT * (0.5 * cos(rectPrism[i].angle) + 0.5);
+        
+        rectPrism[i].distanceFromMiddle =  distanceFromMiddle;
         
     }
 
@@ -141,8 +161,10 @@ int main(){
     /* set back pixel buffer to start of SDRAM memory */
     *(pixel_ctrl_ptr + 1) = 0xC0000000;
     pixel_buffer_start = *(pixel_ctrl_ptr + 1); // we draw on the back buffer
-
-
+    
+	// int pulse out incrementer
+    double pulse_radius = 0;
+    
     while (1)
     {
         /* Erase any boxes and lines that were drawn in the last iteration */
@@ -152,23 +174,45 @@ int main(){
         for(i = 0; i < NUM_PRISMS; i++){
             drawAPrism(rectPrism[i]);
         }
-
-        // Update length of each prism to make it oscillate
-        for(i = 0; i < NUM_PRISMS; i++){
+		if (run) {
+        	// Update length of each prism to make it oscillate
+       		for(i = 0; i < NUM_PRISMS; i++){
             
-            // Control oscillation speed here
-            rectPrism[i].angle += oscillationRate;
+            	// Control oscillation speed here
+            	rectPrism[i].angle += oscillationRate;
 
-            // Prevent overflow
-            if(rectPrism[i].angle > 2*PI){
-                rectPrism[i].angle -= 2*PI;
-            }
-
-            rectPrism[i].height = INITIAL_HEIGHT * (0.5 * cos(rectPrism[i].angle) + 0.5);
-        }
+            	// Prevent overflow
+            	if(rectPrism[i].angle > 2*PI){
+                	rectPrism[i].angle -= 2*PI;
+            	}
+                
+                rectPrism[i].height = INITIAL_HEIGHT * (0.5 * cos(rectPrism[i].angle) + 0.5);
+                pulse_radius = 0;
+                
+//                if(pulse_out) {
+//
+//                        if (rectPrism[i].distanceFromMiddle <= pulse_radius){
+//                            rectPrism[i].height = INITIAL_HEIGHT;
+//                        } else {
+//                            rectPrism[i].height = 0;
+//                        }
+//
+//                        pulse_radius += 0.0001;
+//
+//                        if (pulse_radius > (MAX_DISTANCE)) {
+//                            pulse_radius = 0;
+//                        }
+//                } else {
+//                    rectPrism[i].height = INITIAL_HEIGHT * (0.5 * cos(rectPrism[i].angle) + 0.5);
+//                    pulse_radius = 0;
+//                }
+        	}
+       	}
 
         SBitSync(); // swap front and back buffers on VGA vertical sync
         pixel_buffer_start = *(pixel_ctrl_ptr + 1); // reflect the address of new back buffer
+        
+        checkForKeys();
     }
 }
 
@@ -359,5 +403,33 @@ void clear_screen()
             plot_pixel(x, y, IVORY);
         }
     }
+}
+
+void checkForKeys()
+{
+	if (*keys_edge_ptr == 1) { // Key 0 (Start/Stop)
+    	run = !run;
+    } else if (*keys_edge_ptr == 2) { // Key 1 (Increment Speed)
+    	if(!pulse_out) { 
+       	 oscillationRate += oscillationRate * oscillationFactor;
+        } else {
+        	new_pulse = true;
+        }
+    } else if (*keys_edge_ptr == 4) { // Key 2 (Decrement Speed)
+    	oscillationRate -= oscillationRate * oscillationFactor;
+    } else if (*keys_edge_ptr == 8) {  // Key 3
+    	pulse_out = !pulse_out;
+        new_pulse = true;
+    }
+    
+    // Reset edge capture
+    *keys_edge_ptr = *keys_edge_ptr;
+}
+
+
+
+void stopOnKey()
+{
+	while(((*keys_ptr)) != 0){}
 }
 
