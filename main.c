@@ -35,10 +35,9 @@ double oscillationRate = 0.2;
 volatile int* keys_ptr = (int *)0xFF200050;
 volatile int* keys_edge_ptr = (int *)0xFF20005C;
 bool run = true;
+double num_pulses = 1000;
+double changeFactor = 0.25;
 bool pulse_out = false;
-// double oscillationFactor = 0.25;
-bool new_pulse = true;
-// bool start_pulse = false;
 
 typedef struct RectangularPrism{
 
@@ -163,7 +162,7 @@ int main(){
     pixel_buffer_start = *(pixel_ctrl_ptr + 1); // we draw on the back buffer
     
 	// int pulse out incrementer
-    double pulse_radius = 0;
+    int pulse_decay = 0;
     
     while (1)
     {
@@ -174,6 +173,7 @@ int main(){
         for(i = 0; i < NUM_PRISMS; i++){
             drawAPrism(rectPrism[i]);
         }
+        
 		if (run) {
         	// Update length of each prism to make it oscillate
        		for(i = 0; i < NUM_PRISMS; i++){
@@ -186,26 +186,31 @@ int main(){
                 	rectPrism[i].angle -= 2*PI;
             	}
                 
-                rectPrism[i].height = INITIAL_HEIGHT * (0.5 * cos(rectPrism[i].angle) + 0.5);
-                pulse_radius = 0;
-                
-//                if(pulse_out) {
-//
-//                        if (rectPrism[i].distanceFromMiddle <= pulse_radius){
-//                            rectPrism[i].height = INITIAL_HEIGHT;
-//                        } else {
-//                            rectPrism[i].height = 0;
-//                        }
-//
-//                        pulse_radius += 0.0001;
-//
-//                        if (pulse_radius > (MAX_DISTANCE)) {
-//                            pulse_radius = 0;
-//                        }
-//                } else {
-//                    rectPrism[i].height = INITIAL_HEIGHT * (0.5 * cos(rectPrism[i].angle) + 0.5);
-//                    pulse_radius = 0;
-//                }
+                // Decay the height to zero, and then de-decays the height if the decay is turned off
+				if(pulse_out || pulse_decay != 0) {
+                   
+                    // Linearly decay the height to zero
+                    double pure_height = INITIAL_HEIGHT * (0.5 * cos(rectPrism[i].angle) + 0.5);
+                    double decayed_height = pulse_decay * INITIAL_HEIGHT / num_pulses;
+                    
+                    // Add the decay
+                    if(pure_height - decayed_height > 0) {
+                        rectPrism[i].height = pure_height - decayed_height;
+                    } else {
+                        rectPrism[i].height = 0;
+                    }
+                    
+                    // Increment or decrement pulse_decay
+                    if (pulse_out && pulse_decay < num_pulses) {
+                        pulse_decay++;
+                    } else if (!pulse_out && pulse_decay > 0) {
+                        pulse_decay--;
+                    }
+
+                } else {
+                	rectPrism[i].height = INITIAL_HEIGHT * (0.5 * cos(rectPrism[i].angle) + 0.5);
+                    pulse_decay = 0;
+                }
         	}
        	}
 
@@ -410,16 +415,20 @@ void checkForKeys()
 	if (*keys_edge_ptr == 1) { // Key 0 (Start/Stop)
     	run = !run;
     } else if (*keys_edge_ptr == 2) { // Key 1 (Increment Speed)
-    	if(!pulse_out) { 
-       	 oscillationRate += oscillationRate * oscillationFactor;
-        } else {
-        	new_pulse = true;
+        if(!pulse_out) {
+        	oscillationRate += oscillationRate * changeFactor;
+       	} else {
+        	num_pulses -= num_pulses  * changeFactor;
+            if(num_pulses <= 0) num_pulses = 1;
         }
     } else if (*keys_edge_ptr == 4) { // Key 2 (Decrement Speed)
-    	oscillationRate -= oscillationRate * oscillationFactor;
+    	if(!pulse_out) {
+        	oscillationRate -= oscillationRate * changeFactor;
+       	} else {
+        	num_pulses += num_pulses  * changeFactor;  
+        }
     } else if (*keys_edge_ptr == 8) {  // Key 3
     	pulse_out = !pulse_out;
-        new_pulse = true;
     }
     
     // Reset edge capture
